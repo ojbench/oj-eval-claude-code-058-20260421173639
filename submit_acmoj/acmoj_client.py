@@ -1,27 +1,5 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-ACMOJ API Client Command Line Tool - Git Submission Version v2.2
-
-Usage Examples:
-1. Submit Git URL:
-   python3 acmoj_client.py --token ${ACMOJ_TOKEN} submit --problem-id ${ACMOJ_PROBLEM_ID} --git-url ${REPO_URL}
-   The returned result contains submission_id information, please save it for subsequent status queries
-   
-   URL format can be HTTPS or SSH:
-   - HTTPS: https://github.com/username/repository.git
-   - SSH: git@github.com:username/repository.git
-
-2. Query submission status:
-   python3 acmoj_client.py --token ${ACMOJ_TOKEN} status --submission-id <your_submission_id>
-   Note: Evaluation takes time, it's recommended to wait 10 seconds before querying status
-   For example, if the returned result shows "status": "compiling" or "status": "pending", 
-   it means the evaluation is still in progress or queued, please check again later
-
-3. Abort submission:
-   python3 acmoj_client.py --token ${ACMOJ_TOKEN} abort --submission-id <your_submission_id>
-   Abort the evaluation of the specified submission
-"""
 
 import requests
 import json
@@ -37,7 +15,6 @@ class ACMOJClient:
         self.api_base = "https://acm.sjtu.edu.cn/OnlineJudge/api/v1"
         self.headers = {
             "Authorization": f"Bearer {access_token}",
-            "Content-Type": "application/x-www-form-urlencoded",
             "User-Agent": "ACMOJ-Python-Client/2.2"
         }
 
@@ -45,13 +22,16 @@ class ACMOJClient:
         
 
     def _make_request(self, method: str, endpoint: str, data: Dict[str, Any] = None, 
-                     params: Dict[str, Any] = None) -> Optional[Dict]:
+                     params: Dict[str, Any] = None, json_data: Dict[str, Any] = None) -> Optional[Dict]:
         url = f"{self.api_base}{endpoint}"
         try:
             if method.upper() == "GET":
                 response = requests.get(url, headers=self.headers, params=params, timeout=10, proxies={"https": None, "http": None})
             elif method.upper() == "POST":
-                response = requests.post(url, headers=self.headers, data=data, timeout=10, proxies={"https": None, "http": None})
+                if json_data:
+                    response = requests.post(url, headers=self.headers, json=json_data, timeout=10, proxies={"https": None, "http": None})
+                else:
+                    response = requests.post(url, headers=self.headers, data=data, timeout=10, proxies={"https": None, "http": None})
             else:
                 print(f"Unsupported HTTP method: {method}")
                 return None
@@ -95,6 +75,16 @@ class ACMOJClient:
 
         return result
 
+    def submit_cc(self, problem_id: int, file_path: str) -> Optional[Dict]:
+        with open(file_path, 'r') as f:
+            content = f.read()
+        json_data = {"language": "cc", "code": content}
+        result = self._make_request("POST", f"/problem/{problem_id}/submit", json_data=json_data)
+        if result and 'id' in result:
+            self._save_submission_id(result['id'])
+
+        return result
+
     def get_submission_detail(self, submission_id: int) -> Optional[Dict]:
         return self._make_request("GET", f"/submission/{submission_id}")
 
@@ -112,7 +102,8 @@ def main():
     # Git submission sub-command
     submit_parser = subparsers.add_parser("submit", help="Submit Git repository")
     submit_parser.add_argument("--problem-id", type=int, required=True, help="Problem ID")
-    submit_parser.add_argument("--git-url", type=str, required=True, help="Git repository URL")
+    submit_parser.add_argument("--git-url", type=str, help="Git repository URL")
+    submit_parser.add_argument("--file", type=str, help="Source file path for direct submission")
 
     # Sub-command for checking submission status
     status_parser = subparsers.add_parser("status", help="Check submission status")
@@ -131,7 +122,13 @@ def main():
     client = ACMOJClient(args.token)
 
     if args.command == "submit":
-        result = client.submit_git(args.problem_id, args.git_url)
+        if args.git_url:
+            result = client.submit_git(args.problem_id, args.git_url)
+        elif args.file:
+            result = client.submit_cc(args.problem_id, args.file)
+        else:
+            print("Error: Either --git-url or --file must be provided for submit command")
+            return
     elif args.command == "status":
         result = client.get_submission_detail(args.submission_id)
     elif args.command == "abort":
